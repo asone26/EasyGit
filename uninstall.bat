@@ -1,10 +1,13 @@
 @echo off
 setlocal
-python "%~dp0easygit.py" --uninstall
+if exist "%~dp0easygit.exe" (
+    "%~dp0easygit.exe" --uninstall
+) else (
+    python "%~dp0easygit.py" --uninstall
+)
 if errorlevel 1 (
     echo.
-    echo [ERROR] Failed to execute Python.
+    echo [ERROR] Uninstallation failed.
 )
 echo.
 pause
-

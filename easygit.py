@@ -100,10 +100,31 @@ def reset_token():
         print("[알림] 저장된 토큰이 없습니다.")
 
 
+def get_app_dir():
+    """Return directory of running executable or script."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def is_double_clicked():
+    """Detect if the console was launched via Windows GUI double-click."""
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        pids = (ctypes.c_uint * 2)()
+        count = kernel32.GetConsoleProcessList(pids, 2)
+        return count <= 2
+    except Exception:
+        return False
+
+
 def install_to_path():
     """Register EasyGit directory to Windows User PATH."""
     import winreg
-    target_dir = str(Path(__file__).resolve().parent)
+    target_dir = str(get_app_dir())
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_ALL_ACCESS)
     except Exception as e:
@@ -159,7 +180,7 @@ def install_to_path():
 def uninstall_from_path():
     """Remove EasyGit directory from Windows User PATH and clean up config."""
     import winreg
-    target_dir = str(Path(__file__).resolve().parent)
+    target_dir = str(get_app_dir())
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_ALL_ACCESS)
     except Exception as e:
@@ -387,58 +408,83 @@ def main():
     # 1. GitHub 인증
     token, username = get_token()
 
-    # 2. 저장소 이름 결정
+    # 2. 대상 폴더 확인 및 로컬 Git 사전 점검
+    print(f"\n[대상 폴더] {target_dir}")
+    is_git_repo = (target_dir / ".git").is_dir()
+    if is_git_repo:
+        print("[주의] 해당 폴더에 이미 로컬 Git 저장소(.git)가 초기화되어 있습니다.")
+        confirm = input("기존 로컬 Git 환경을 유지한 채로 작업을 계속 진행하시겠습니까? (y/N) [기본값: N]: ").strip().lower()
+        if confirm != "y":
+            print("[중단] 사용자의 요청으로 작업을 안전하게 취소했습니다.")
+            sys.exit(0)
+
+    # 3. 저장소 이름 결정
     default_name = sanitize_repo_name(target_dir.name)
     if args.name:
         repo_name = sanitize_repo_name(args.name)
     else:
-        print(f"\n[대상 폴더] {target_dir}")
-        user_name = input(f"저장소 이름 입력 [기본값: {default_name}]: ").strip()
+        user_name = input(f"GitHub 저장소 이름 입력 [기본값: {default_name}]: ").strip()
         repo_name = sanitize_repo_name(user_name) if user_name else default_name
 
-    # 3. 공개 범위 (Visibility) 결정
-    if args.public:
-        is_private = False
-    elif args.private:
-        is_private = True
-    else:
-        print("\n공개 범위(Visibility) 설정:")
-        print("  1) Private (비공개 - 권장)")
-        print("  2) Public  (공개)")
-        choice = input("선택 [기본값: 1]: ").strip()
-        is_private = (choice != "2")
-
-    visibility_str = "Private (비공개)" if is_private else "Public (공개)"
-    print(f"\n▶ 레포지토리: @{username}/{repo_name}")
-    print(f"▶ 공개 범위: {visibility_str}")
-    print(f"▶ 커밋 메시지: {args.message}")
-
-    # 4. GitHub 원격 저장소 생성 API 호출
-    print("\n[1/5] GitHub에 새 저장소 생성 중...")
+    # 4. GitHub 원격 저장소 중복 여부 확인
     repo_data = None
     try:
-        repo_data = github_request(
-            "/user/repos",
-            token=token,
-            method="POST",
-            data={
-                "name": repo_name,
-                "private": is_private,
-                "auto_init": False
-            }
-        )
-        print(f" -> 원격 저장소 생성 완료: {repo_data.get('html_url')}")
-    except RuntimeError as e:
-        if "name already exists" in str(e).lower():
-            print(f"[알림] GitHub에 이미 '{repo_name}' 저장소가 존재합니다.")
-            reuse = input("기존 저장소에 연결하여 계속 진행할까요? (y/N): ").strip().lower()
-            if reuse != "y":
-                print("작업을 중단합니다.")
+        existing = github_request(f"/repos/{username}/{repo_name}", token=token)
+        if existing and existing.get("name"):
+            print(f"\n[주의] GitHub에 동일한 이름의 원격 저장소(@{username}/{repo_name})가 이미 존재합니다.")
+            confirm = input("기존 원격 저장소에 연결하여 계속 진행하시겠습니까? (y/N) [기본값: N]: ").strip().lower()
+            if confirm != "y":
+                print("[중단] 사용자의 요청으로 작업을 안전하게 취소했습니다.")
                 sys.exit(0)
-            repo_data = github_request(f"/repos/{username}/{repo_name}", token=token)
+            repo_data = existing
+    except Exception:
+        pass
+
+    # 5. 공개 범위 (Visibility) 결정 및 원격 저장소 생성
+    if not repo_data:
+        if args.public:
+            is_private = False
+        elif args.private:
+            is_private = True
         else:
-            print(f"[오류] 저장소 생성 실패: {e}")
-            sys.exit(1)
+            print("\n공개 범위(Visibility) 설정:")
+            print("  1) Private (비공개 - 권장)")
+            print("  2) Public  (공개)")
+            choice = input("선택 [기본값: 1]: ").strip()
+            is_private = (choice != "2")
+
+        visibility_str = "Private (비공개)" if is_private else "Public (공개)"
+        print(f"\n▶ 레포지토리: @{username}/{repo_name}")
+        print(f"▶ 공개 범위: {visibility_str}")
+        print(f"▶ 커밋 메시지: {args.message}")
+
+        # GitHub 원격 저장소 생성 API 호출
+        print("\n[1/5] GitHub에 새 저장소 생성 중...")
+        try:
+            repo_data = github_request(
+                "/user/repos",
+                token=token,
+                method="POST",
+                data={
+                    "name": repo_name,
+                    "private": is_private,
+                    "auto_init": False
+                }
+            )
+            print(f" -> 원격 저장소 생성 완료: {repo_data.get('html_url')}")
+        except RuntimeError as e:
+            if "name already exists" in str(e).lower():
+                print(f"[주의] GitHub에 이미 '{repo_name}' 저장소가 존재합니다.")
+                confirm = input("기존 원격 저장소에 연결하여 계속 진행하시겠습니까? (y/N) [기본값: N]: ").strip().lower()
+                if confirm != "y":
+                    print("[중단] 사용자의 요청으로 작업을 안전하게 취소했습니다.")
+                    sys.exit(0)
+                repo_data = github_request(f"/repos/{username}/{repo_name}", token=token)
+            else:
+                print(f"[오류] 저장소 생성 실패: {e}")
+                sys.exit(1)
+    else:
+        print(f" -> 기존 원격 저장소에 연결합니다: {repo_data.get('html_url')}")
 
     html_url = repo_data.get("html_url")
     # 토큰 포함 원격 URL 구성 (HTTPS 푸시 인증 자동 통과)
@@ -520,8 +566,18 @@ def main():
 
 
 if __name__ == "__main__":
+    exit_code = 0
     try:
         main()
     except KeyboardInterrupt:
         print("\n[취소] 사용자에 의해 작업이 중단되었습니다.")
-        sys.exit(0)
+    except Exception as e:
+        print(f"\n[오류] 프로그램 실행 중 문제가 발생했습니다: {e}")
+        exit_code = 1
+    finally:
+        if is_double_clicked():
+            try:
+                input("\n종료하려면 Enter 키를 누르세요...")
+            except Exception:
+                pass
+    sys.exit(exit_code)
