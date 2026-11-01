@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Slate Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#181D26"/>
+      <stop offset="100%" stop-color="#0B0E14"/>
+    </linearGradient>
+
+    <!-- Git Vibrant Orange Gradient -->
+    <linearGradient id="gitOrange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6B4A"/>
+      <stop offset="100%" stop-color="#F05033"/>
+    </linearGradient>
+
+    <!-- Soft Drop Shadow -->
+    <filter id="textShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Modern App Squircle Plate -->
+  <rect x="36" y="36" width="440" height="440" rx="104" fill="url(#bgGrad)" stroke="#2E3644" stroke-width="3"/>
+
+  <!-- Subtle Accent Git Line between words -->
+  <rect x="186" y="248" width="140" height="6" rx="3" fill="url(#gitOrange)" opacity="0.6"/>
+
+  <!-- Stacked Typography -->
+  <g filter="url(#textShadow)" text-anchor="middle" font-family="'Segoe UI', -apple-system, system-ui, Arial, sans-serif">
+    <!-- easy -->
+    <text x="256" y="215" font-size="124" font-weight="900" fill="#FFFFFF" letter-spacing="-2">easy</text>
+    
+    <!-- git -->
+    <text x="256" y="375" font-size="142" font-weight="900" fill="url(#gitOrange)" letter-spacing="-2">git</text>
+  </g>
+</svg>
