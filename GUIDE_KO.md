@@ -30,12 +30,14 @@ EasyGit은 **Classic 토큰**과 **Fine-grained 토큰** 모두 지원합니다.
 
 ---
 
-## 2. 설치 및 설정
+## 2. 설치 및 환경 설정
 
-### 2.1 전역 명령어 등록 (어디서나 실행하기)
-1. `c:\Project\EasyGit\install.bat` 파일을 더블클릭합니다.
-2. 현재 EasyGit 폴더가 Windows 사용자 `PATH`에 등록됩니다.
-3. 새 터미널 창을 열면 어떤 디렉토리에서든 `easygit` 명령어를 사용할 수 있습니다.
+### 2.1 자동 전역 등록 (Self-Setup)
+별도의 설치 배치 파일을 실행할 필요 없이, **`easygit.exe`를 실행하기만 하면** 프로그램이 스스로 전역 환경(PATH 및 PowerShell 프로필) 등록 여부를 검사합니다:
+- **미등록 상태**: 시스템 `PATH` 및 PowerShell 프로필에 최초 1회 자동 등록
+- **이미 등록된 상태**: 아무런 지연 없이 즉시 Git 초기화 및 생성 작업으로 진입
+
+*(원하는 경우 기존 `install.bat` 또는 `install.ps1`을 통한 수동 설치도 여전히 지원합니다.)*
 
 ### 2.2 설치 제거 (삭제 방법)
 - **자동 제거**: `c:\Project\EasyGit\uninstall.bat`을 더블클릭하거나 터미널에서 `easygit --uninstall`을 실행합니다.

@@ -121,14 +121,50 @@ def is_double_clicked():
         return False
 
 
-def install_to_path():
-    """Register EasyGit directory to Windows User PATH."""
+def update_powershell_profiles(action="install"):
+    """Register or remove 'easygit' and '.\\easygit' in PowerShell profiles."""
+    profile_dirs = [
+        Path.home() / "Documents" / "WindowsPowerShell",
+        Path.home() / "Documents" / "PowerShell"
+    ]
+    target_exe = str(get_app_dir() / "easygit.exe")
+    fn_code = (
+        "\n# EasyGit CLI Integration\n"
+        f'function easygit {{ & "{target_exe}" @args }}\n'
+        f'function .\\easygit {{ & "{target_exe}" @args }}\n'
+    )
+
+    for pdir in profile_dirs:
+        profile_file = pdir / "Microsoft.PowerShell_profile.ps1"
+        try:
+            if action == "install":
+                pdir.mkdir(parents=True, exist_ok=True)
+                existing = profile_file.read_text(encoding="utf-8") if profile_file.exists() else ""
+                # 기존 구버전 함수 제거 후 최신 등록
+                cleaned = existing.replace("# EasyGit alias for .\\easygit\nfunction .\\easygit { & easygit @args }\n", "")
+                if "# EasyGit CLI Integration" not in cleaned:
+                    cleaned += fn_code
+                profile_file.write_text(cleaned, encoding="utf-8")
+            elif action == "uninstall" and profile_file.exists():
+                existing = profile_file.read_text(encoding="utf-8")
+                cleaned = existing.replace(fn_code, "").replace(
+                    "# EasyGit alias for .\\easygit\nfunction .\\easygit { & easygit @args }\n", ""
+                )
+                profile_file.write_text(cleaned, encoding="utf-8")
+        except Exception:
+            pass
+
+
+def install_to_path(verbose=True):
+    """Register EasyGit directory to Windows User PATH and PowerShell profile."""
+    update_powershell_profiles("install")
     import winreg
     target_dir = str(get_app_dir())
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_ALL_ACCESS)
     except Exception as e:
-        print(f"[오류] 레지스트리 접근 실패: {e}")
+        if verbose:
+            print(f"[오류] 레지스트리 접근 실패: {e}")
         return
 
     try:
@@ -138,12 +174,13 @@ def install_to_path():
 
     paths = [p for p in current_path.split(";") if p]
     if any(p.rstrip("\\/").lower() == target_dir.rstrip("\\/").lower() for p in paths):
-        print("=" * 60)
-        print("  EasyGit 전역 명령어(PATH) 등록")
-        print("=" * 60)
-        print(f"[알림] 이미 사용자 PATH에 등록되어 있습니다:")
-        print(f"  {target_dir}\n")
-        print("새 터미널(CMD/PowerShell)을 열고 'easygit'을 실행해보세요.")
+        if verbose:
+            print("=" * 60)
+            print("  EasyGit 전역 명령어(PATH) 등록")
+            print("=" * 60)
+            print(f"[알림] 이미 사용자 PATH에 등록되어 있습니다:")
+            print(f"  {target_dir}\n")
+            print("새 터미널(CMD/PowerShell)을 열고 'easygit'을 실행해보세요.")
         winreg.CloseKey(key)
         return
 
@@ -167,18 +204,68 @@ def install_to_path():
         except Exception:
             pass
 
-        print("=" * 60)
-        print("  EasyGit 전역 명령어(PATH) 등록")
-        print("=" * 60)
-        print("[성공] 사용자 PATH 등록 완료!")
-        print(f"  -> 등록 경로: {target_dir}\n")
-        print("새 터미널(CMD/PowerShell)을 열면 어느 폴더에서나 'easygit'을 실행할 수 있습니다.")
+        if verbose:
+            print("=" * 60)
+            print("  EasyGit 전역 명령어(PATH) 등록")
+            print("=" * 60)
+            print("[성공] 사용자 PATH 및 PowerShell 프로필 등록 완료!")
+            print(f"  -> 등록 경로: {target_dir}\n")
+            print("▶ 새 터미널(CMD/PowerShell) 창에서는 바로 'easygit'을 사용할 수 있습니다.")
+            print("▶ 현재 열려 있는 PowerShell 창에서 바로 쓰시려면 아래 명령어를 실행하세요:")
+            print("   . $PROFILE")
+        else:
+            print(f"[자동 환경 설정] 시스템 PATH 및 PowerShell 프로필에 자동 등록되었습니다 ({target_dir})")
     except Exception as e:
-        print(f"[오류] PATH 등록 실패: {e}")
+        if verbose:
+            print(f"[오류] PATH 등록 실패: {e}")
+
+
+def ensure_installed():
+    """Silently check and install to PATH and PowerShell profile if needed."""
+    if not sys.platform.startswith("win"):
+        return
+
+    target_dir = str(get_app_dir())
+    needs_install = False
+
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_READ)
+        try:
+            current_path, _ = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            current_path = ""
+        winreg.CloseKey(key)
+
+        paths = [p for p in current_path.split(";") if p]
+        if not any(p.rstrip("\\/").lower() == target_dir.rstrip("\\/").lower() for p in paths):
+            needs_install = True
+    except Exception:
+        pass
+
+    profile_dirs = [
+        Path.home() / "Documents" / "WindowsPowerShell",
+        Path.home() / "Documents" / "PowerShell"
+    ]
+    for pdir in profile_dirs:
+        pfile = pdir / "Microsoft.PowerShell_profile.ps1"
+        if not pfile.exists():
+            needs_install = True
+            break
+        try:
+            if "# EasyGit CLI Integration" not in pfile.read_text(encoding="utf-8"):
+                needs_install = True
+                break
+        except Exception:
+            pass
+
+    if needs_install:
+        install_to_path(verbose=False)
 
 
 def uninstall_from_path():
     """Remove EasyGit directory from Windows User PATH and clean up config."""
+    update_powershell_profiles("uninstall")
     import winreg
     target_dir = str(get_app_dir())
     try:
@@ -382,16 +469,18 @@ def main():
     parser.add_argument("--dir", "-d", default=".", help="대상 디렉토리 경로 (기본값: 현재 위치)")
     args = parser.parse_args()
 
-    if args.install:
-        install_to_path()
-        sys.exit(0)
-
     if args.uninstall:
         uninstall_from_path()
         sys.exit(0)
 
     if args.reset_token:
         reset_token()
+        sys.exit(0)
+
+    # 실행 시 전역 PATH 및 PowerShell 등록 상태 자동 확인 및 설치
+    ensure_installed()
+
+    if args.install:
         sys.exit(0)
 
     check_git_installed()
