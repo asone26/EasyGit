@@ -522,6 +522,29 @@ def sanitize_repo_name(name):
     return cleaned or "my-new-project"
 
 
+def check_large_files(target_dir, max_size_mb=100):
+    """Check for files exceeding GitHub's file size limit."""
+    large_files = []
+    max_bytes = max_size_mb * 1024 * 1024
+
+    for root, dirs, files in os.walk(target_dir):
+        # .git 디렉토리 제외
+        if ".git" in dirs:
+            dirs.remove(".git")
+        for f in files:
+            fp = Path(root) / f
+            try:
+                if fp.is_file() and not fp.is_symlink():
+                    sz = fp.stat().st_size
+                    if sz > max_bytes:
+                        rel_path = fp.relative_to(target_dir)
+                        large_files.append((str(rel_path), sz / (1024 * 1024)))
+            except Exception:
+                pass
+
+    return large_files
+
+
 def ensure_not_empty(target_dir, repo_name):
     """Ensure repository has at least one file to commit."""
     items = list(target_dir.iterdir())
@@ -711,6 +734,34 @@ def main():
     # 빈 폴더 방지
     ensure_not_empty(target_dir, repo_name)
 
+    # 대용량 파일(100MB 초과) 사전 검사 (GitHub 정책상 푸시 거부 방지)
+    large_files = check_large_files(target_dir, max_size_mb=100)
+    if large_files:
+        print("\n" + "!" * 60)
+        print(" [경고] GitHub 파일 크기 제한(100MB)을 초과하는 대용량 파일 발견!")
+        print("!" * 60)
+        for lf, sz in large_files[:10]:
+            print(f"  - {lf} ({sz:.1f} MB)")
+        if len(large_files) > 10:
+            print(f"  ... 외 {len(large_files) - 10}개 파일")
+        print("\nGitHub는 100MB를 초과하는 단일 파일 푸시를 거부(reject)합니다.")
+        print("해당 파일들을 .gitignore에 추가한 후 계속 진행하는 것을 강력히 권장합니다.")
+        add_gi = input("해당 파일들의 확장자/경로를 .gitignore에 자동 등록하시겠습니까? (Y/n) [기본값: Y]: ").strip().lower()
+        if add_gi != "n":
+            gi_path = target_dir / ".gitignore"
+            existing_gi = gi_path.read_text(encoding="utf-8") if gi_path.exists() else ""
+            lines_to_add = []
+            for lf, _ in large_files:
+                entry = f"/{lf}"
+                if entry not in existing_gi:
+                    lines_to_add.append(entry)
+            if lines_to_add:
+                with open(gi_path, "a", encoding="utf-8") as f:
+                    f.write("\n# GitHub 100MB file limit auto-ignored\n" + "\n".join(lines_to_add) + "\n")
+                print(f" -> .gitignore에 {len(lines_to_add)}개 항목을 등록했습니다.")
+        else:
+            print("[주의] 대용량 파일이 포함된 상태로 푸시를 시도합니다. (GitHub에서 거부될 수 있습니다)")
+
     # 7. 파일 스테이징 및 커밋
     print("\n[4/5] 변경사항 커밋 중...")
     run_cmd("git add -A", cwd=target_dir)
@@ -738,21 +789,32 @@ def main():
     # 8. 원격 저장소로 푸시
     print("\n[5/5] GitHub로 푸시 중 (git push -u origin main)...")
     try:
-        run_cmd("git push -u origin main", cwd=target_dir)
+        # 실시간 진행률(Progress) 표시를 위해 직접 실행 (버퍼링 방지)
+        res = subprocess.run(
+            "git push -u origin main --progress",
+            cwd=target_dir,
+            shell=True
+        )
+        if res.returncode != 0:
+            print("[경고] 표준 푸시 실패. 강제 푸시(--force) 재시도 중...")
+            res_force = subprocess.run(
+                "git push --set-upstream origin main --force --progress",
+                cwd=target_dir,
+                shell=True
+            )
+            if res_force.returncode != 0:
+                print("[오류] 푸시 실패. 네트워크 또는 저장소 상태를 확인해주세요.")
+                sys.exit(1)
         print(" -> Push 완료!")
-    except RuntimeError as e:
-        print(f"[경고] 표준 푸시 실패. 재시도 중...\n{e}")
+    except Exception as push_err:
+        print(f"[오류] 푸시 도중 예외 발생: {push_err}")
+        sys.exit(1)
+    finally:
+        # 보안을 위해 어떤 경우에도 origin URL을 토큰 없는 표준 URL로 재설정
         try:
-            # 원격에 파일이 이미 있을 경우 대비 --set-upstream
-            run_cmd("git push --set-upstream origin main --force", cwd=target_dir)
-            print(" -> 강제 푸시 완료!")
-        except Exception as push_err:
-            print(f"[오류] 푸시 실패: {push_err}")
-            print("수동으로 'git push -u origin main'을 실행해보세요.")
-            sys.exit(1)
-
-    # 보안을 위해 origin URL을 토큰 없는 표준 URL로 재설정
-    run_cmd(f'git remote set-url origin "{standard_clone_url}"', cwd=target_dir)
+            run_cmd(f'git remote set-url origin "{standard_clone_url}"', cwd=target_dir)
+        except Exception:
+            pass
 
     print("\n" + "=" * 60)
     print(" 🎉 축하합니다! 모든 작업이 성공적으로 완료되었습니다.")
