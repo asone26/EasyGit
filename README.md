@@ -1,9 +1,9 @@
 # EasyGit 🚀
 
 > **Guides / 가이드 문서**:
-> - 🇰🇷 [한국어 사용자 가이드 (Korean User Guide)](file:///c:/Project/EasyGit/GUIDE_KO.md)
-> - 🇺🇸 [English User Guide](file:///c:/Project/EasyGit/GUIDE_EN.md)
-> - 📋 [Master Specification (마스터 정의서)](file:///c:/Project/EasyGit/master.md)
+> - 🇰🇷 [한국어 사용자 가이드 (Korean User Guide)](./GUIDE_KO.md)
+> - 🇺🇸 [English User Guide](./GUIDE_EN.md)
+> - 📋 [Master Specification (마스터 정의서)](./master.md)
 
 신규 프로젝트 폴더에서 **폴더명 기반 GitHub 레포 생성**, **Private/Public 선택**, **로컬 Git 초기화**, **커밋**, **푸시**를 한 번에 끝내는 원스톱 도구입니다.
 

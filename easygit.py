@@ -222,17 +222,30 @@ def install_to_path(verbose=True):
             if verbose:
                 print(f"[오류] PATH 등록 실패: {e}")
     else:
-        # macOS / Linux (zsh / bash 지원)
+        # macOS / Linux (zsh / bash 지원 및 ~/.local/bin 래퍼 등록)
         rc_files = [Path.home() / ".zshrc", Path.home() / ".bashrc"]
-        alias_line = f'alias easygit="python3 \\"{script_path}\\""\n'
+        alias_line = f'alias easygit="python3 \\"{script_path}\\""'
+        
         for rc in rc_files:
             try:
                 content = rc.read_text(encoding="utf-8") if rc.exists() else ""
-                if "alias easygit=" not in content:
-                    with open(rc, "a", encoding="utf-8") as f:
-                        f.write(f"\n# EasyGit CLI\n{alias_line}")
+                lines = content.splitlines()
+                # 기존 easygit alias 제거 후 최신 경로로 등록
+                cleaned_lines = [l for l in lines if "alias easygit=" not in l and "# EasyGit CLI" not in l]
+                cleaned_lines.append(f"\n# EasyGit CLI\n{alias_line}")
+                rc.write_text("\n".join(cleaned_lines).strip() + "\n", encoding="utf-8")
             except Exception:
                 pass
+
+        # ~/.local/bin/easygit 실행 래퍼 스크립트 생성 (서브쉘/비대화형 쉘/IDE 터미널 지원)
+        local_bin = Path.home() / ".local" / "bin"
+        try:
+            local_bin.mkdir(parents=True, exist_ok=True)
+            wrapper_script = local_bin / "easygit"
+            wrapper_script.write_text(f'#!/usr/bin/env bash\nexec python3 "{script_path}" "$@"\n', encoding="utf-8")
+            wrapper_script.chmod(0o755)
+        except Exception:
+            pass
 
         try:
             os.chmod(script_path, 0o755)
@@ -241,13 +254,15 @@ def install_to_path(verbose=True):
 
         if verbose:
             print("=" * 60)
-            print("  EasyGit 전역 명령어(alias) 등록 (macOS/Linux)")
+            print("  EasyGit 전역 명령어 등록 (macOS/Linux)")
             print("=" * 60)
-            print(f"[성공] ~/.zshrc 및 ~/.bashrc에 'easygit' alias 등록 완료!")
-            print(f"  -> 실행 파일: {script_path}\n")
+            print(f"[성공] 전역 명령어 등록 완료!")
+            print(f"  -> 실행 파일: {script_path}")
+            print(f"  -> CLI 래퍼: ~/.local/bin/easygit")
+            print(f"  -> shell alias: ~/.zshrc 및 ~/.bashrc\n")
             print("▶ 새 터미널을 열거나 'source ~/.zshrc'를 실행하면 바로 'easygit'을 사용할 수 있습니다.")
         else:
-            print(f"[자동 환경 설정] shell profile에 easygit alias가 등록되었습니다.")
+            print(f"[자동 환경 설정] shell profile 및 ~/.local/bin에 easygit이 등록되었습니다.")
 
 
 def ensure_installed():
@@ -291,8 +306,17 @@ def ensure_installed():
             install_to_path(verbose=False)
     else:
         # macOS / Linux
+        script_path = str(get_app_dir() / "easygit.py")
         zshrc = Path.home() / ".zshrc"
-        if not zshrc.exists() or "alias easygit=" not in zshrc.read_text(encoding="utf-8", errors="ignore"):
+        wrapper = Path.home() / ".local" / "bin" / "easygit"
+        needs_install = False
+
+        if not zshrc.exists() or script_path not in zshrc.read_text(encoding="utf-8", errors="ignore"):
+            needs_install = True
+        if not wrapper.exists():
+            needs_install = True
+
+        if needs_install:
             install_to_path(verbose=False)
 
 
@@ -356,10 +380,19 @@ def uninstall_from_path():
                 try:
                     lines = rc.read_text(encoding="utf-8").splitlines()
                     filtered = [l for l in lines if "EasyGit" not in l and "alias easygit=" not in l]
-                    rc.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+                    rc.write_text("\n".join(filtered).strip() + "\n", encoding="utf-8")
                 except Exception:
                     pass
-        print("[성공] ~/.zshrc 및 ~/.bashrc에서 EasyGit 등록이 제거되었습니다.")
+
+        # ~/.local/bin/easygit 제거
+        wrapper = Path.home() / ".local" / "bin" / "easygit"
+        if wrapper.exists():
+            try:
+                wrapper.unlink()
+            except Exception:
+                pass
+
+        print("[성공] shell profile 및 ~/.local/bin에서 EasyGit 등록이 제거되었습니다.")
 
     # 설정 파일(토큰) 삭제 안내/정리
     if CONFIG_DIR.exists():
@@ -492,11 +525,14 @@ def sanitize_repo_name(name):
 def ensure_not_empty(target_dir, repo_name):
     """Ensure repository has at least one file to commit."""
     items = list(target_dir.iterdir())
-    # Exclude .git and easygit scripts from consideration
-    meaningful = [
-        it for it in items
-        if it.name != ".git" and it.name not in ("easygit.py", "easygit.bat", "install.bat")
-    ]
+    # Exclude .git, OS metadata, and easygit scripts from consideration
+    ignored_names = {
+        ".git", ".DS_Store", "Thumbs.db", ".Spotlight-V100", ".Trashes",
+        "easygit.py", "easygit.bat", "easygit.exe", "easygit.zip",
+        "easygit.ico", "easygit.png", "easygit.svg",
+        "install.bat", "install.sh", "install.ps1", "uninstall.bat"
+    }
+    meaningful = [it for it in items if it.name not in ignored_names]
     if not meaningful:
         readme_path = target_dir / "README.md"
         if not readme_path.exists():
@@ -524,11 +560,12 @@ def main():
         reset_token()
         sys.exit(0)
 
+    if args.install:
+        install_to_path(verbose=True)
+        sys.exit(0)
+
     # 실행 시 전역 PATH 및 PowerShell 등록 상태 자동 확인 및 설치
     ensure_installed()
-
-    if args.install:
-        sys.exit(0)
 
     check_git_installed()
 
@@ -635,6 +672,28 @@ def main():
         print(" -> git init 완료.")
     else:
         print(" -> 기존 .git 저장소 감지됨.")
+
+    # macOS 한글 파일명 깨짐 방지 및 터미널 출력 최적화
+    try:
+        run_cmd("git config core.precomposeunicode true", cwd=target_dir)
+        run_cmd("git config core.quotepath false", cwd=target_dir)
+    except Exception:
+        pass
+
+    # Git user.name 및 user.email 미설정 시 커밋 실패 방지
+    try:
+        user_name_cfg = run_cmd("git config user.name", cwd=target_dir)
+        if not user_name_cfg:
+            run_cmd(f'git config user.name "{username}"', cwd=target_dir)
+    except Exception:
+        run_cmd(f'git config user.name "{username}"', cwd=target_dir)
+
+    try:
+        user_email_cfg = run_cmd("git config user.email", cwd=target_dir)
+        if not user_email_cfg:
+            run_cmd(f'git config user.email "{username}@users.noreply.github.com"', cwd=target_dir)
+    except Exception:
+        run_cmd(f'git config user.email "{username}@users.noreply.github.com"', cwd=target_dir)
 
     # 기본 브랜치 main으로 통일
     run_cmd("git branch -M main", cwd=target_dir)

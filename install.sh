@@ -13,5 +13,4 @@ echo "======================================================"
 chmod +x "$SCRIPT_PATH"
 python3 "$SCRIPT_PATH" --install
 
-echo "설치가 완료되었습니다. 터미널을 새로 열거나 'source ~/.zshrc'를 실행하세요."
 
